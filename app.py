@@ -28,41 +28,40 @@ if archivo:
         if all(col in df.columns for col in columnas_requeridas):
 
             def calcular_probabilidad(row):
-                # Base por interacciones (más estricto)
+                # Más estricto con interacciones
                 if row["Número de interacciones"] >= 6:
-                    base = 0.25
-                elif row["Número de interacciones"] >= 4:
                     base = 0.15
+                elif row["Número de interacciones"] >= 4:
+                    base = 0.08
                 elif row["Número de interacciones"] >= 2:
-                    base = 0.05
+                    base = 0.03
                 else:
                     base = 0.0
 
-                # Canal bonus
-                canal_bonus = 0.05 if row["Canal"] == "Meta" else 0.1
+                # Canal bonus reducido
+                canal_bonus = 0.03 if row["Canal"] == "Meta" else 0.07
 
-                # Estatus bonus ajustado
+                # Estatus bonus más limitado
                 estatus_bonus = {
                     "Análisis": 0.0,
-                    "Diseño": 0.1,
-                    "Negociación": 0.35
+                    "Diseño": 0.07,
+                    "Negociación": 0.2
                 }.get(row["Estatus"], 0)
 
-                # Rango de presupuesto óptimo
-                presupuesto_bonus = 0.15 if 300000 <= row["Presupuesto"] <= 600000 else 0
+                # Presupuesto ideal más específico
+                presupuesto_bonus = 0.1 if 300000 <= row["Presupuesto"] <= 600000 else 0
 
-                # Respuesta del cliente
+                # Respuestas más conservadoras
                 contacto_bonus = 0
                 if row["Contestó correo"]:
-                    contacto_bonus += 0.05
+                    contacto_bonus += 0.02
                 if row["Contestó mensaje"]:
-                    contacto_bonus += 0.05
+                    contacto_bonus += 0.03
                 if row["Contestó llamada"]:
-                    contacto_bonus += 0.2  # llamadas tienen mayor impacto
+                    contacto_bonus += 0.15
 
-                # Total
                 prob = base + canal_bonus + estatus_bonus + presupuesto_bonus + contacto_bonus
-                return min(prob, 1)
+                return min(prob, 0.7)  # límite máximo más estricto
 
             df["Probabilidad de Cierre"] = df.apply(calcular_probabilidad, axis=1)
             df["Valor Estimado"] = df["Presupuesto"] * df["Probabilidad de Cierre"]
