@@ -1,9 +1,9 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (Ajustado)")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (Ajustado con corrección)")
 st.markdown("Carga tu base de leads para estimar la probabilidad de cierre con mayor precisión.")
 
 # Cargar archivo
@@ -27,8 +27,12 @@ if archivo:
 
         if all(col in df.columns for col in columnas_necesarias):
 
+            # Convertir texto tipo 'FALSO'/'VERDADERO' a booleanos reales
+            for col in ["Contestó correo", "Contestó mensaje", "Contestó llamada"]:
+                df[col] = df[col].astype(str).str.upper().map({"VERDADERO": True, "FALSO": False}).fillna(False)
+
             def calcular_probabilidad(row):
-                # Condición: estatus en análisis y sin ningún tipo de respuesta
+                # Condición: en análisis y no ha respondido por ningún canal
                 if row["Estatus"] == "Análisis" and not (row["Contestó correo"] or row["Contestó mensaje"] or row["Contestó llamada"]):
                     return 0.0
 
