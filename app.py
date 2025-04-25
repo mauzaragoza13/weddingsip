@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -28,7 +27,6 @@ if archivo:
 
         if all(col in df.columns for col in columnas_necesarias):
 
-            # Convertir texto tipo 'FALSO'/'VERDADERO' a booleanos reales
             for col in ["Contestó correo", "Contestó mensaje", "Contestó llamada"]:
                 df[col] = df[col].astype(str).str.upper().map({"VERDADERO": True, "FALSO": False}).fillna(False)
 
@@ -85,15 +83,16 @@ if archivo:
             if valor_total > 1000000:
                 st.warning("⚠️ El valor estimado del funnel supera el cierre mensual histórico ($1,000,000). Revisa criterios o prioriza leads.")
 
-            # Gráfico de Wedding Planner (ajustado en tamaño)
+            # Gráfico de Wedding Planner aún más pequeño
             st.subheader("📊 Valor Estimado por Wedding Planner")
             resumen = df.groupby("Wedding Planner")["Valor Estimado"].sum().sort_values(ascending=False)
 
-            fig, ax = plt.subplots(figsize=(6, 3))  # tamaño ajustado
+            fig, ax = plt.subplots(figsize=(5, 2))  # tamaño más pequeño
             resumen.plot(kind="bar", ax=ax)
             ax.set_ylabel("Valor Estimado ($)")
-            ax.set_title("Valor Estimado por Wedding Planner")
-            ax.tick_params(axis='x', rotation=45)
+            ax.set_title("Valor Estimado por Wedding Planner", fontsize=10)
+            ax.tick_params(axis='x', rotation=45, labelsize=8)
+            ax.tick_params(axis='y', labelsize=8)
             st.pyplot(fig)
 
         else:
