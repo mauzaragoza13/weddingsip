@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (gráfico ultracompacto)")
-st.markdown("Carga tu base de leads para estimar la probabilidad de cierre y ver el resumen por Wedding Planner.")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (con resumen por WP)")
+st.markdown("Carga tu base de leads para estimar la probabilidad de cierre y visualizar resultados por Wedding Planner.")
 
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
@@ -73,8 +73,8 @@ if archivo:
 
             st.subheader("Resultados del Funnel:")
             st.dataframe(df[[
-                "Nombre del lead", "Wedding Planner", "Presupuesto", "Canal", "Estatus",
-                "Contestó correo", "Contestó mensaje", "Contestó llamada",
+                "Nombre del lead", "Wedding Planner", "Presupuesto", "Número de interacciones",
+                "Canal", "Estatus", "Contestó correo", "Contestó mensaje", "Contestó llamada",
                 "Probabilidad de Cierre", "Valor Estimado"
             ]])
 
@@ -84,11 +84,10 @@ if archivo:
             if valor_total > 1000000:
                 st.warning("⚠️ El valor estimado del funnel supera el cierre mensual histórico ($1,000,000). Revisa criterios o prioriza leads.")
 
-            # Gráfico ultracompacto
             st.subheader("📊 Valor Estimado por Wedding Planner")
             resumen = df.groupby("Wedding Planner")["Valor Estimado"].sum().sort_values(ascending=False)
 
-            fig, ax = plt.subplots(figsize=(4, 1.5))  # tamaño aún más pequeño
+            fig, ax = plt.subplots(figsize=(4, 1.5))
             resumen.plot(kind="bar", ax=ax)
             ax.set_ylabel("Valor Estimado ($)", fontsize=7)
             ax.set_title("Valor Estimado por WP", fontsize=9)
