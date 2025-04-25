@@ -20,7 +20,6 @@ if archivo:
         st.subheader("Vista previa de los datos:")
         st.dataframe(df.head())
 
-        # Verificar columnas necesarias
         columnas_necesarias = [
             "Nombre del lead", "Presupuesto", "Número de interacciones", "Canal", "Estatus",
             "Contestó correo", "Contestó mensaje", "Contestó llamada"
@@ -29,6 +28,10 @@ if archivo:
         if all(col in df.columns for col in columnas_necesarias):
 
             def calcular_probabilidad(row):
+                # Condición: estatus en análisis y sin ningún tipo de respuesta
+                if row["Estatus"] == "Análisis" and not (row["Contestó correo"] or row["Contestó mensaje"] or row["Contestó llamada"]):
+                    return 0.0
+
                 # Interacciones
                 if row["Número de interacciones"] >= 6:
                     base = 0.04
@@ -42,7 +45,7 @@ if archivo:
                 # Canal
                 canal_bonus = 0.01 if row["Canal"] == "Meta" else 0.03
 
-                # Estatus: mucho más severo con Análisis
+                # Estatus
                 if row["Estatus"] == "Análisis":
                     estatus_bonus = 0.0
                 elif row["Estatus"] == "Diseño":
@@ -52,10 +55,10 @@ if archivo:
                 else:
                     estatus_bonus = 0.0
 
-                # Presupuesto óptimo
+                # Presupuesto ideal
                 presupuesto_bonus = 0.03 if 450000 <= row["Presupuesto"] <= 520000 else 0
 
-                # Contacto del cliente
+                # Contacto
                 contacto_bonus = 0
                 if row["Contestó correo"]:
                     contacto_bonus += 0.005
