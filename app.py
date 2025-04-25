@@ -1,13 +1,12 @@
-
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (Probabilidad hasta 70%)")
-st.markdown("Carga tu base de leads para estimar la probabilidad de cierre con hasta un 70%.")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (con gráficas por WP)")
+st.markdown("Carga tu base de leads para estimar la probabilidad de cierre y visualizar resultados por Wedding Planner.")
 
-# Cargar archivo
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
 if archivo:
@@ -23,12 +22,12 @@ if archivo:
 
         columnas_necesarias = [
             "Nombre del lead", "Presupuesto", "Número de interacciones", "Canal", "Estatus",
-            "Contestó correo", "Contestó mensaje", "Contestó llamada"
+            "Contestó correo", "Contestó mensaje", "Contestó llamada", "Wedding Planner"
         ]
 
         if all(col in df.columns for col in columnas_necesarias):
 
-            # Convertir 'FALSO'/'VERDADERO' a booleanos reales
+            # Convertir texto tipo 'FALSO'/'VERDADERO' a booleanos reales
             for col in ["Contestó correo", "Contestó mensaje", "Contestó llamada"]:
                 df[col] = df[col].astype(str).str.upper().map({"VERDADERO": True, "FALSO": False}).fillna(False)
 
@@ -79,7 +78,7 @@ if archivo:
 
             st.subheader("Resultados del Funnel:")
             st.dataframe(df[[
-                "Nombre del lead", "Presupuesto", "Canal", "Estatus",
+                "Nombre del lead", "Wedding Planner", "Presupuesto", "Canal", "Estatus",
                 "Contestó correo", "Contestó mensaje", "Contestó llamada",
                 "Probabilidad de Cierre", "Valor Estimado"
             ]])
@@ -90,8 +89,19 @@ if archivo:
             if valor_total > 1000000:
                 st.warning("⚠️ El valor estimado del funnel supera el cierre mensual histórico ($1,000,000). Revisa criterios o prioriza leads.")
 
+            # Gráfico de barras por Wedding Planner
+            st.subheader("📊 Valor Estimado por Wedding Planner")
+            resumen = df.groupby("Wedding Planner")["Valor Estimado"].sum().sort_values(ascending=False)
+
+            fig, ax = plt.subplots()
+            resumen.plot(kind="bar", ax=ax)
+            ax.set_ylabel("Valor Estimado ($)")
+            ax.set_title("Valor Estimado por Wedding Planner")
+            ax.tick_params(axis='x', rotation=45)
+            st.pyplot(fig)
+
         else:
-            st.error("El archivo no contiene todas las columnas necesarias.")
+            st.error("Faltan columnas necesarias. Asegúrate de incluir la columna 'Wedding Planner' también.")
 
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}")
