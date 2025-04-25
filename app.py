@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -35,7 +36,6 @@ if archivo:
                 if row["Estatus"] == "Análisis" and not (row["Contestó correo"] or row["Contestó mensaje"] or row["Contestó llamada"]):
                     return 0.0
 
-                # Interacciones
                 if row["Número de interacciones"] >= 6:
                     base = 0.06
                 elif row["Número de interacciones"] >= 4:
@@ -45,10 +45,8 @@ if archivo:
                 else:
                     base = 0.0
 
-                # Canal
                 canal_bonus = 0.01 if row["Canal"] == "Meta" else 0.04
 
-                # Estatus
                 if row["Estatus"] == "Análisis":
                     estatus_bonus = 0.0
                 elif row["Estatus"] == "Diseño":
@@ -58,10 +56,8 @@ if archivo:
                 else:
                     estatus_bonus = 0.0
 
-                # Presupuesto ideal
                 presupuesto_bonus = 0.06 if 450000 <= row["Presupuesto"] <= 520000 else 0
 
-                # Contacto
                 contacto_bonus = 0
                 if row["Contestó correo"]:
                     contacto_bonus += 0.01
@@ -89,11 +85,11 @@ if archivo:
             if valor_total > 1000000:
                 st.warning("⚠️ El valor estimado del funnel supera el cierre mensual histórico ($1,000,000). Revisa criterios o prioriza leads.")
 
-            # Gráfico de barras por Wedding Planner
+            # Gráfico de Wedding Planner (ajustado en tamaño)
             st.subheader("📊 Valor Estimado por Wedding Planner")
             resumen = df.groupby("Wedding Planner")["Valor Estimado"].sum().sort_values(ascending=False)
 
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(6, 3))  # tamaño ajustado
             resumen.plot(kind="bar", ax=ax)
             ax.set_ylabel("Valor Estimado ($)")
             ax.set_title("Valor Estimado por Wedding Planner")
