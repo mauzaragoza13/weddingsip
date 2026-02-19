@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,42 +6,64 @@ import numpy as np
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (con ajuste por tiempo)")
-st.markdown("Carga tu base de leads para estimar la probabilidad de cierre y visualizar resultados por Wedding Planner. "
-            "Ahora ajusta por antigüedad usando Created Time vs hoy (promedio cierre: 23 días).")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (ajuste por tiempo + horizonte)")
+st.markdown(
+    "Estimación ajustada usando: (1) score base, (2) decaimiento por tiempo (Created Time→hoy, promedio cierre 23 días), "
+    "(3) escalones por atraso, (4) horizonte de cierre cercano (tipo 14–21 días)."
+)
 
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
-PROMEDIO_CIERRE = 23  # días promedio de cierre
+PROMEDIO_CIERRE = 23  # días promedio histórico a cierre
 
-def time_factor(dias, estatus):
-    """
-    Ajuste por vigencia temporal:
-    - Antes de 23 días: casi no castiga.
-    - Después de 23: decae exponencialmente.
-    - Decae más rápido en 'Análisis', más lento en 'Negociación'.
-    """
+# --- Paso 1 + 2: ajuste por tiempo (agresivo + escalones) ---
+def time_factor_estricto(dias, estatus):
     if pd.isna(dias) or dias < 0:
         return 1.0
 
     estatus = str(estatus).strip()
 
-    # Half-life: cuántos días "pasados" para reducirse a la mitad
+    # half-life agresivo: después de 23 días, cae a la mitad cada X días
     if estatus == "Análisis":
-        half_life = 8     # muy estricto
+        half_life = 5
     elif estatus == "Diseño":
-        half_life = 12
+        half_life = 8
     elif estatus == "Negociación":
-        half_life = 18    # más tolerante
+        half_life = 12
     else:
-        half_life = 10
+        half_life = 7
 
     overdue = max(0, dias - PROMEDIO_CIERRE)
     factor = 0.5 ** (overdue / half_life)
 
-    # piso mínimo para no matar totalmente por regla
-    return float(np.clip(factor, 0.03, 1.0))
+    # Paso 2: escalones duros para leads muy pasados (solo Análisis/Diseño)
+    if estatus in ["Análisis", "Diseño"]:
+        if dias > 35:
+            factor *= 0.75
+        if dias > 45:
+            factor *= 0.65
+        if dias > 60:
+            factor *= 0.50
 
+    return float(np.clip(factor, 0.02, 1.0))
+
+# --- Paso 3: horizonte (queremos prob. de cierre pronto, no eventual) ---
+def horizonte_factor(estatus):
+    """
+    Ajusta a “probabilidad de cerrar pronto” (ej. próximos 14–21 días).
+    - Análisis: muy baja prob de cerrar pronto
+    - Diseño: media
+    - Negociación: alta (pero no 1)
+    """
+    estatus = str(estatus).strip()
+    if estatus == "Análisis":
+        return 0.50
+    elif estatus == "Diseño":
+        return 0.65
+    elif estatus == "Negociación":
+        return 0.85
+    else:
+        return 0.55
 
 if archivo:
     try:
@@ -57,36 +78,16 @@ if archivo:
 
         columnas_necesarias = [
             "Nombre del lead", "Presupuesto", "Número de interacciones", "Canal", "Estatus",
-            "Contestó correo", "Contestó mensaje", "Contestó llamada", "Wedding Planner"
+            "Contestó correo", "Contestó mensaje", "Contestó llamada", "Wedding Planner",
+            "Created Time"  # 👈 ya lo tienes en tu archivo final
         ]
 
         if not all(col in df.columns for col in columnas_necesarias):
-            st.error("Faltan columnas necesarias. Asegúrate de incluir: "
-                     + ", ".join(columnas_necesarias))
+            faltan = [c for c in columnas_necesarias if c not in df.columns]
+            st.error(f"Faltan columnas necesarias: {faltan}")
             st.stop()
 
-        # --- detectar columna Created Time ---
-        posibles_created = [
-            "Created Time", "Created time", "created time", "Fecha creación", "Fecha de creación",
-            "Creado", "Fecha creado", "Fecha alta", "Created", "created", "Creation Date"
-        ]
-        created_candidates = [c for c in df.columns if c in posibles_created]
-
-        # también detecta por coincidencia parcial
-        if not created_candidates:
-            created_candidates = [c for c in df.columns if "created" in c.lower() or "crea" in c.lower()]
-
-        if not created_candidates:
-            st.error("No encuentro la columna de fecha de creación (Created Time). "
-                     "Agrega una columna tipo 'Created Time' o 'Fecha de creación'.")
-            st.stop()
-
-        if len(created_candidates) == 1:
-            created_col = created_candidates[0]
-        else:
-            created_col = st.selectbox("Selecciona la columna de Created Time (fecha de creación):", created_candidates)
-
-        # normalizar booleanos (más robusto)
+        # Booleans robustos
         for col in ["Contestó correo", "Contestó mensaje", "Contestó llamada"]:
             df[col] = (
                 df[col].astype(str).str.strip().str.upper()
@@ -97,15 +98,14 @@ if archivo:
                 .fillna(False)
             )
 
-        # parsear created time
-        df[created_col] = pd.to_datetime(df[created_col], errors="coerce")
-
+        # Parse Created Time
+        df["Created Time"] = pd.to_datetime(df["Created Time"], errors="coerce")
         hoy = pd.Timestamp(datetime.now().date())
-        df["Días desde creación"] = (hoy - df[created_col]).dt.days
+        df["Días desde creación"] = (hoy - df["Created Time"]).dt.days
 
-        # ------- tu score base (igual, pero luego ajusta por tiempo) -------
+        # --- tu score base (SIN tocar tus criterios) ---
         def prob_base(row):
-            # Regla dura: si está en análisis y no respondió nada -> 0
+            # si está en análisis y no respondió nada -> 0
             if row["Estatus"] == "Análisis" and not (row["Contestó correo"] or row["Contestó mensaje"] or row["Contestó llamada"]):
                 return 0.0
 
@@ -141,45 +141,56 @@ if archivo:
                 contacto_bonus += 0.10
 
             p = base + canal_bonus + estatus_bonus + presupuesto_bonus + contacto_bonus
-            return min(max(p, 0.0), 0.70)
+            return float(np.clip(p, 0.0, 0.70))
 
+        # --- prob final: base * tiempo (paso 1+2) * horizonte (paso 3) ---
         def calcular_probabilidad(row):
+            # Si tienes un estatus de cerrado ganado y lo quieres como 100%:
+            if str(row["Estatus"]).strip() in ["Cerrada Ganada", "Cerrado", "Closed Won"]:
+                return 1.0
+
             p0 = prob_base(row)
-            tf = time_factor(row["Días desde creación"], row["Estatus"])
-            p = p0 * tf
+            tf = time_factor_estricto(row["Días desde creación"], row["Estatus"])
+            hf = horizonte_factor(row["Estatus"])
+            p = p0 * tf * hf
             return float(np.clip(p, 0.0, 0.70))
 
         df["Probabilidad Base"] = df.apply(prob_base, axis=1)
         df["Probabilidad de Cierre"] = df.apply(calcular_probabilidad, axis=1)
         df["Valor Estimado"] = df["Presupuesto"] * df["Probabilidad de Cierre"]
 
-        # métricas útiles para explicar calibración
-        st.subheader("Resumen de ajuste por tiempo")
-        st.write(f"📌 Promedio histórico de cierre: **{PROMEDIO_CIERRE} días** (ancla del decaimiento).")
+        # Resumen
+        st.subheader("Resumen de ajuste")
+        st.write(f"📌 Promedio histórico de cierre: **{PROMEDIO_CIERRE} días**.")
+
         st.metric("Probabilidad promedio (base)", f"{df['Probabilidad Base'].mean()*100:.1f}%")
         st.metric("Probabilidad promedio (ajustada hoy)", f"{df['Probabilidad de Cierre'].mean()*100:.1f}%")
 
-        overdue = (df["Días desde creación"] > PROMEDIO_CIERRE).sum()
+        overdue = int((df["Días desde creación"] > PROMEDIO_CIERRE).sum())
         st.metric("Leads 'pasados' (>23 días)", f"{overdue} de {len(df)}")
 
+        valor_total = float(df["Valor Estimado"].sum())
+        st.metric("💰 Valor total estimado del funnel (cierre cercano)", f"${valor_total:,.2f}")
+        st.caption("Este valor está diseñado para representar un funnel 'cerrable pronto' (ej. próximas 2–3 semanas), "
+                   "por eso es más conservador que el funnel 'eventual'.")
+
+        # Tabla
         st.subheader("Resultados del Funnel:")
         st.dataframe(df[[
             "Nombre del lead", "Wedding Planner", "Presupuesto", "Número de interacciones",
             "Canal", "Estatus", "Contestó correo", "Contestó mensaje", "Contestó llamada",
-            created_col, "Días desde creación",
+            "Created Time", "Días desde creación",
             "Probabilidad Base", "Probabilidad de Cierre", "Valor Estimado"
         ]])
 
-        valor_total = df["Valor Estimado"].sum()
-        st.metric("💰 Valor total estimado del funnel (ajustado hoy)", f"${valor_total:,.2f}")
-
+        # Gráfica por WP
         st.subheader("📊 Valor Estimado por Wedding Planner")
         resumen = df.groupby("Wedding Planner")["Valor Estimado"].sum().sort_values(ascending=False)
 
         fig, ax = plt.subplots(figsize=(6, 2.4))
         resumen.plot(kind="bar", ax=ax)
         ax.set_ylabel("Valor Estimado ($)")
-        ax.set_title("Valor Estimado por WP (ajustado por tiempo)")
+        ax.set_title("Valor Estimado por WP (cierre cercano)")
         ax.tick_params(axis='x', rotation=45)
         st.pyplot(fig)
 
