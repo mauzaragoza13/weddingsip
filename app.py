@@ -6,25 +6,25 @@ import numpy as np
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, sin cerrados ganados)")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, conservador)")
 st.markdown(
-    "Estimación ajustada usando: (1) score base, (2) decaimiento por tiempo (Created Time→hoy, promedio cierre 23 días), "
+    "Estimación ajustada usando: (1) score base (tus criterios), (2) decaimiento por tiempo (Created Time→hoy, promedio cierre 23 días), "
     "(3) escalones por atraso, (4) horizonte de cierre cercano. "
-    "**Se omiten Cerrada Ganada**."
+    "**Se omiten Cerrada Ganada** y en **Análisis** solo pasan leads con señales fuertes."
 )
 
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
 PROMEDIO_CIERRE = 23  # días promedio histórico a cierre
+FACTOR_VENTANA = 0.90  # 👈 micro-ajuste para bajar ~10% el total (sube/baja si necesitas)
 
-# Paso 1+2: tiempo más agresivo
+# Paso 1+2: tiempo agresivo + escalones
 def time_factor_estricto(dias, estatus):
     if pd.isna(dias) or dias < 0:
         return 1.0
 
     estatus = str(estatus).strip()
 
-    # más agresivo especialmente en Análisis
     if estatus == "Análisis":
         half_life = 4
     elif estatus == "Diseño":
@@ -37,7 +37,6 @@ def time_factor_estricto(dias, estatus):
     overdue = max(0, dias - PROMEDIO_CIERRE)
     factor = 0.5 ** (overdue / half_life)
 
-    # escalones duros para muy pasados (Análisis/Diseño)
     if estatus in ["Análisis", "Diseño"]:
         if dias > 35:
             factor *= 0.70
@@ -46,19 +45,20 @@ def time_factor_estricto(dias, estatus):
         if dias > 60:
             factor *= 0.45
 
-    return float(np.clip(factor, 0.02, 1.0))
+    # 👇 piso más bajo para no “mantener vivos” leads viejos
+    return float(np.clip(factor, 0.01, 1.0))
 
-# Paso 3: horizonte (cierre cercano)
+# Paso 3: horizonte más estricto (cierre aún más cercano)
 def horizonte_factor(estatus):
     estatus = str(estatus).strip()
     if estatus == "Análisis":
-        return 0.35   # más conservador (antes 0.50)
+        return 0.30
     elif estatus == "Diseño":
-        return 0.60
+        return 0.55
     elif estatus == "Negociación":
-        return 0.85
+        return 0.80
     else:
-        return 0.45
+        return 0.40
 
 if archivo:
     try:
@@ -92,20 +92,19 @@ if archivo:
                 .fillna(False)
             )
 
-        # Parse Created Time y días desde creación
+        # Parse Created Time y días desde creación (hoy)
         df["Created Time"] = pd.to_datetime(df["Created Time"], errors="coerce")
         hoy = pd.Timestamp(datetime.now().date())
         df["Días desde creación"] = (hoy - df["Created Time"]).dt.days
 
-        # 1) OMITIR cerrados ganados (y sinónimos)
+        # Omitir cerrados ganados
         cerrados_ganados = ["Cerrada Ganada", "Cerrado", "Closed Won", "Ganada"]
         mask_ganados = df["Estatus"].astype(str).str.strip().isin(cerrados_ganados)
         st.caption(f"Se omitieron **{int(mask_ganados.sum())}** registros con estatus de cerrado ganado.")
         df = df.loc[~mask_ganados].copy()
 
-        # ---- score base (lo que ya tenías) ----
+        # Score base (tus criterios tal cual)
         def prob_base(row):
-            # compuerta: si está en análisis y NO respondió nada -> 0
             if row["Estatus"] == "Análisis" and not (row["Contestó correo"] or row["Contestó mensaje"] or row["Contestó llamada"]):
                 return 0.0
 
@@ -142,11 +141,8 @@ if archivo:
             p = base + canal_bonus + estatus_bonus + presupuesto_bonus + contacto_bonus
             return float(np.clip(p, 0.0, 0.70))
 
-        # ---- NUEVO: compuerta estricta solo para Análisis ----
+        # Gate estricto para Análisis (para no dejar tantos vivos)
         def gate_analisis(row):
-            """
-            En Análisis, solo dejamos prob si hay señales fuertes.
-            """
             if str(row["Estatus"]).strip() != "Análisis":
                 return True
 
@@ -154,25 +150,27 @@ if archivo:
             llamada = bool(row["Contestó llamada"])
             msg = bool(row["Contestó mensaje"])
 
-            # Reglas: basta con 1 condición
+            # más estricto: llamada OR (>=5 interacciones) OR (msg y >=3 interacciones)
             if llamada:
                 return True
-            if inter >= 4:
+            if inter >= 5:
                 return True
-            if msg and inter >= 2:
+            if msg and inter >= 3:
                 return True
 
             return False
 
         def calcular_probabilidad(row):
-            # si no pasa la compuerta de Análisis -> 0
             if not gate_analisis(row):
                 return 0.0
 
             p0 = prob_base(row)
             tf = time_factor_estricto(row["Días desde creación"], row["Estatus"])
             hf = horizonte_factor(row["Estatus"])
+
             p = p0 * tf * hf
+            p *= FACTOR_VENTANA  # micro-ajuste para encajar en 400k–600k
+
             return float(np.clip(p, 0.0, 0.70))
 
         df["Probabilidad Base"] = df.apply(prob_base, axis=1)
@@ -181,20 +179,24 @@ if archivo:
 
         # Resumen
         st.subheader("Resumen de ajuste")
-        st.write(f"📌 Promedio histórico de cierre: **{PROMEDIO_CIERRE} días**.")
+        st.write(f"📌 Promedio histórico de cierre: **{PROMEDIO_CIERRE} días** (ancla del decaimiento).")
+
         st.metric("Probabilidad promedio (base)", f"{df['Probabilidad Base'].mean()*100:.1f}%")
         st.metric("Probabilidad promedio (ajustada hoy)", f"{df['Probabilidad de Cierre'].mean()*100:.1f}%")
 
         overdue = int((df["Días desde creación"] > PROMEDIO_CIERRE).sum())
         st.metric("Leads 'pasados' (>23 días)", f"{overdue} de {len(df)}")
 
-        # ¿cuántos de análisis quedaron vivos?
         analisis = df["Estatus"].astype(str).str.strip().eq("Análisis")
         analisis_vivos = int((analisis & (df["Probabilidad de Cierre"] > 0)).sum())
         st.metric("Análisis con prob > 0", f"{analisis_vivos}")
 
         valor_total = float(df["Valor Estimado"].sum())
         st.metric("💰 Valor total estimado del funnel (cierre cercano)", f"${valor_total:,.2f}")
+        st.caption(
+            "Este valor está diseñado para representar un funnel 'cerrable pronto' (ventana corta). "
+            f"FACTOR_VENTANA actual: {FACTOR_VENTANA:.2f}"
+        )
 
         st.subheader("Resultados del Funnel:")
         st.dataframe(df[[
