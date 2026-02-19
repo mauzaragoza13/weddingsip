@@ -16,7 +16,7 @@ st.markdown(
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
 PROMEDIO_CIERRE = 23  # días promedio histórico a cierre
-FACTOR_VENTANA = 0.90  # 👈 micro-ajuste para bajar ~10% el total (sube/baja si necesitas)
+FACTOR_VENTANA = 1.05  # 👈 si te dio ~500k, esto lo sube aprox a ~550k (control fino)
 
 # Paso 1+2: tiempo agresivo + escalones
 def time_factor_estricto(dias, estatus):
@@ -45,10 +45,9 @@ def time_factor_estricto(dias, estatus):
         if dias > 60:
             factor *= 0.45
 
-    # 👇 piso más bajo para no “mantener vivos” leads viejos
     return float(np.clip(factor, 0.01, 1.0))
 
-# Paso 3: horizonte más estricto (cierre aún más cercano)
+# Paso 3: horizonte más estricto (cierre cercano)
 def horizonte_factor(estatus):
     estatus = str(estatus).strip()
     if estatus == "Análisis":
@@ -150,7 +149,7 @@ if archivo:
             llamada = bool(row["Contestó llamada"])
             msg = bool(row["Contestó mensaje"])
 
-            # más estricto: llamada OR (>=5 interacciones) OR (msg y >=3 interacciones)
+            # estricto: llamada OR (>=5 interacciones) OR (msg y >=3 interacciones)
             if llamada:
                 return True
             if inter >= 5:
@@ -169,7 +168,7 @@ if archivo:
             hf = horizonte_factor(row["Estatus"])
 
             p = p0 * tf * hf
-            p *= FACTOR_VENTANA  # micro-ajuste para encajar en 400k–600k
+            p *= FACTOR_VENTANA  # control fino para acercar el funnel al rango semanal deseado
 
             return float(np.clip(p, 0.0, 0.70))
 
@@ -193,10 +192,7 @@ if archivo:
 
         valor_total = float(df["Valor Estimado"].sum())
         st.metric("💰 Valor total estimado del funnel (cierre cercano)", f"${valor_total:,.2f}")
-        st.caption(
-            "Este valor está diseñado para representar un funnel 'cerrable pronto' (ventana corta). "
-            f"FACTOR_VENTANA actual: {FACTOR_VENTANA:.2f}"
-        )
+        st.caption(f"FACTOR_VENTANA (control fino) actual: **{FACTOR_VENTANA:.2f}**")
 
         st.subheader("Resultados del Funnel:")
         st.dataframe(df[[
