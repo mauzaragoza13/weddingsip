@@ -6,58 +6,61 @@ import numpy as np
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, conservador)")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, calibrado)")
 st.markdown(
     "Estimación ajustada usando: (1) score base (tus criterios), (2) decaimiento por tiempo (Created Time→hoy, promedio cierre 23 días), "
     "(3) escalones por atraso, (4) horizonte de cierre cercano. "
-    "**Se omiten Cerrada Ganada** y en **Análisis** solo pasan leads con señales fuertes."
+    "**Se omiten Cerrada Ganada** y en **Análisis** solo pasan leads con señales."
 )
 
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
 PROMEDIO_CIERRE = 23  # días promedio histórico a cierre
-FACTOR_VENTANA = 1.05  # 👈 si te dio ~500k, esto lo sube aprox a ~550k (control fino)
+FACTOR_VENTANA = 1.08  # 👈 menos rudo: sube ~3% vs 1.05, aprox empuja hacia 570–600k
 
-# Paso 1+2: tiempo agresivo + escalones
+# Paso 1+2: tiempo agresivo (pero un poco menos rudo) + escalones suavizados
 def time_factor_estricto(dias, estatus):
     if pd.isna(dias) or dias < 0:
         return 1.0
 
     estatus = str(estatus).strip()
 
+    # Menos rudo que antes (half-life un poco más largo)
     if estatus == "Análisis":
-        half_life = 4
+        half_life = 5      # antes 4
     elif estatus == "Diseño":
-        half_life = 7
+        half_life = 8      # antes 7
     elif estatus == "Negociación":
-        half_life = 11
+        half_life = 12     # antes 11
     else:
-        half_life = 6
+        half_life = 7      # antes 6
 
     overdue = max(0, dias - PROMEDIO_CIERRE)
     factor = 0.5 ** (overdue / half_life)
 
+    # Escalones un poco menos rudos
     if estatus in ["Análisis", "Diseño"]:
         if dias > 35:
-            factor *= 0.70
+            factor *= 0.80   # antes 0.70
         if dias > 45:
-            factor *= 0.60
+            factor *= 0.70   # antes 0.60
         if dias > 60:
-            factor *= 0.45
+            factor *= 0.55   # antes 0.45
 
-    return float(np.clip(factor, 0.01, 1.0))
+    # piso menos rudo
+    return float(np.clip(factor, 0.015, 1.0))  # antes 0.01
 
-# Paso 3: horizonte más estricto (cierre cercano)
+# Paso 3: horizonte (igual, pero menos rudo en Análisis/Diseño)
 def horizonte_factor(estatus):
     estatus = str(estatus).strip()
     if estatus == "Análisis":
-        return 0.30
+        return 0.34   # antes 0.30
     elif estatus == "Diseño":
-        return 0.55
+        return 0.58   # antes 0.55
     elif estatus == "Negociación":
-        return 0.80
+        return 0.82   # antes 0.80
     else:
-        return 0.40
+        return 0.42   # antes 0.40
 
 if archivo:
     try:
@@ -140,7 +143,7 @@ if archivo:
             p = base + canal_bonus + estatus_bonus + presupuesto_bonus + contacto_bonus
             return float(np.clip(p, 0.0, 0.70))
 
-        # Gate estricto para Análisis (para no dejar tantos vivos)
+        # Gate de Análisis menos rudo (comparado con el más estricto)
         def gate_analisis(row):
             if str(row["Estatus"]).strip() != "Análisis":
                 return True
@@ -149,12 +152,12 @@ if archivo:
             llamada = bool(row["Contestó llamada"])
             msg = bool(row["Contestó mensaje"])
 
-            # estricto: llamada OR (>=5 interacciones) OR (msg y >=3 interacciones)
+            # menos rudo: llamada OR (>=4 interacciones) OR (msg y >=2 interacciones)
             if llamada:
                 return True
-            if inter >= 5:
+            if inter >= 4:
                 return True
-            if msg and inter >= 3:
+            if msg and inter >= 2:
                 return True
 
             return False
@@ -168,7 +171,7 @@ if archivo:
             hf = horizonte_factor(row["Estatus"])
 
             p = p0 * tf * hf
-            p *= FACTOR_VENTANA  # control fino para acercar el funnel al rango semanal deseado
+            p *= FACTOR_VENTANA
 
             return float(np.clip(p, 0.0, 0.70))
 
