@@ -6,7 +6,7 @@ import numpy as np
 
 st.set_page_config(page_title="Evaluador de Funnel - Isla Pasión", layout="wide")
 
-st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, calibrado)")
+st.title("📊 Evaluador de Funnel - Isla Pasión Weddings (tiempo + horizonte, suave)")
 st.markdown(
     "Estimación ajustada usando: (1) score base (tus criterios), (2) decaimiento por tiempo (Created Time→hoy, promedio cierre 23 días), "
     "(3) escalones por atraso, (4) horizonte de cierre cercano. "
@@ -16,51 +16,51 @@ st.markdown(
 archivo = st.file_uploader("Sube tu archivo (.csv o .xlsx)", type=["csv", "xlsx"])
 
 PROMEDIO_CIERRE = 23  # días promedio histórico a cierre
-FACTOR_VENTANA = 1.08  # 👈 menos rudo: sube ~3% vs 1.05, aprox empuja hacia 570–600k
+FACTOR_VENTANA = 1.12  # 👈 aún menos rudo (sube un poco el total)
 
-# Paso 1+2: tiempo agresivo (pero un poco menos rudo) + escalones suavizados
-def time_factor_estricto(dias, estatus):
+# Paso 1+2: tiempo más suave + escalones más ligeros
+def time_factor(dias, estatus):
     if pd.isna(dias) or dias < 0:
         return 1.0
 
     estatus = str(estatus).strip()
 
-    # Menos rudo que antes (half-life un poco más largo)
+    # Más suave: half-life más largo (cae más lento)
     if estatus == "Análisis":
-        half_life = 5      # antes 4
+        half_life = 7
     elif estatus == "Diseño":
-        half_life = 8      # antes 7
+        half_life = 10
     elif estatus == "Negociación":
-        half_life = 12     # antes 11
+        half_life = 15
     else:
-        half_life = 7      # antes 6
+        half_life = 9
 
     overdue = max(0, dias - PROMEDIO_CIERRE)
     factor = 0.5 ** (overdue / half_life)
 
-    # Escalones un poco menos rudos
+    # Escalones más ligeros
     if estatus in ["Análisis", "Diseño"]:
-        if dias > 35:
-            factor *= 0.80   # antes 0.70
-        if dias > 45:
-            factor *= 0.70   # antes 0.60
-        if dias > 60:
-            factor *= 0.55   # antes 0.45
+        if dias > 40:
+            factor *= 0.90
+        if dias > 55:
+            factor *= 0.85
+        if dias > 75:
+            factor *= 0.75
 
-    # piso menos rudo
-    return float(np.clip(factor, 0.015, 1.0))  # antes 0.01
+    # piso más alto (menos castigo a leads viejos)
+    return float(np.clip(factor, 0.02, 1.0))
 
-# Paso 3: horizonte (igual, pero menos rudo en Análisis/Diseño)
+# Horizonte más suave
 def horizonte_factor(estatus):
     estatus = str(estatus).strip()
     if estatus == "Análisis":
-        return 0.34   # antes 0.30
+        return 0.38
     elif estatus == "Diseño":
-        return 0.58   # antes 0.55
+        return 0.62
     elif estatus == "Negociación":
-        return 0.82   # antes 0.80
+        return 0.86
     else:
-        return 0.42   # antes 0.40
+        return 0.48
 
 if archivo:
     try:
@@ -143,7 +143,7 @@ if archivo:
             p = base + canal_bonus + estatus_bonus + presupuesto_bonus + contacto_bonus
             return float(np.clip(p, 0.0, 0.70))
 
-        # Gate de Análisis menos rudo (comparado con el más estricto)
+        # Gate de Análisis (suave)
         def gate_analisis(row):
             if str(row["Estatus"]).strip() != "Análisis":
                 return True
@@ -152,10 +152,10 @@ if archivo:
             llamada = bool(row["Contestó llamada"])
             msg = bool(row["Contestó mensaje"])
 
-            # menos rudo: llamada OR (>=4 interacciones) OR (msg y >=2 interacciones)
+            # suave: llamada OR (>=3 interacciones) OR (msg y >=2 interacciones)
             if llamada:
                 return True
-            if inter >= 4:
+            if inter >= 3:
                 return True
             if msg and inter >= 2:
                 return True
@@ -167,12 +167,11 @@ if archivo:
                 return 0.0
 
             p0 = prob_base(row)
-            tf = time_factor_estricto(row["Días desde creación"], row["Estatus"])
+            tf = time_factor(row["Días desde creación"], row["Estatus"])
             hf = horizonte_factor(row["Estatus"])
 
             p = p0 * tf * hf
             p *= FACTOR_VENTANA
-
             return float(np.clip(p, 0.0, 0.70))
 
         df["Probabilidad Base"] = df.apply(prob_base, axis=1)
